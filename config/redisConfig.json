@@ -1,0 +1,6 @@
+{
+    "Host": "localhost",
+    "Post": 6379,
+    "Password": "",
+    "DB": 0
+}
