@@ -3,6 +3,8 @@ package database
 import (
 	"fmt"
 	"time"
+
+	. "github.com/ykyui/camp-jj/service"
 )
 
 type RangeUnit struct {
@@ -12,7 +14,7 @@ type RangeUnit struct {
 
 func NewCamp(msgId int) RangeUnit {
 	rangeUnit := RangeUnit{}
-	redisDb.Set(fmt.Sprintf("newCamp_%d", msgId), typeToJson(rangeUnit), time.Second*120)
+	redisDb.Set(fmt.Sprintf("newCamp_%d", msgId), TypeToJson(rangeUnit), time.Second*120)
 	return rangeUnit
 }
 
@@ -22,12 +24,12 @@ func GetNewCamp(msgId int) (*RangeUnit, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err = jsonToType(s, &rangeUnit); err != nil {
+	if err = JsonToType(s, &rangeUnit); err != nil {
 		return nil, err
 	}
 	return &rangeUnit, nil
 }
 
 func UpdateNewCamp(msgId int, rangeUnit RangeUnit) {
-	redisDb.Set(fmt.Sprintf("newCamp_%d", msgId), typeToJson(rangeUnit), time.Second*120)
+	redisDb.Set(fmt.Sprintf("newCamp_%d", msgId), TypeToJson(rangeUnit), time.Second*120)
 }

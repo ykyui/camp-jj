@@ -40,16 +40,3 @@ func init() {
 func GetMsgById(msgId int) (string, error) {
 	return redisDb.Get(fmt.Sprintf("msg_%d", msgId)).Result()
 }
-
-func typeToJson(i interface{}) string {
-	json, _ := json.Marshal(i)
-	return string(json)
-}
-
-func jsonToType(s string, v interface{}) error {
-	err := json.Unmarshal([]byte(s), &v)
-	if err != nil {
-		return err
-	}
-	return nil
-}

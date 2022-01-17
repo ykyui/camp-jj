@@ -52,7 +52,7 @@ func (b *MyBot) RunBot() {
 					msg, err := f(chatId, msgId, input)
 					if err != nil {
 						fmt.Println(err)
-						continue
+						msg = tgbotapi.NewMessage(chatId, err.Error())
 					}
 					sent, _ := b.bot.Send(msg)
 					go func(chatId int64, msgId int) {
@@ -86,12 +86,12 @@ func (b *MyBot) RunBot() {
 			chatId := update.CallbackQuery.Message.Chat.ID
 			msgId := update.CallbackQuery.Message.MessageID
 			self := strings.Split(update.CallbackQuery.Message.Text, "\n")
-			input := update.CallbackQuery.Data
-			if f, ok := b.callBack[strings.ToLower(input)]; ok {
-				msg, err := f(chatId, msgId, self[0], input)
+			input := strings.Split(update.CallbackQuery.Data, "\n")
+			if f, ok := b.callBack[strings.ToLower(input[0])]; ok {
+				msg, err := f(chatId, msgId, self[0], strings.Join(input[1:len(input)], "\n"))
 				if err != nil {
 					fmt.Println(err)
-					continue
+					msg = tgbotapi.NewEditMessageText(chatId, msgId, err.Error())
 				}
 				sent, _ := b.bot.Send(msg)
 				if _, ok := msg.(tgbotapi.MessageConfig); ok {

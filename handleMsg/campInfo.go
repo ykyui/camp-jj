@@ -25,8 +25,8 @@ func showDate(chatId int64, msgId int) (tgbotapi.Chattable, error) {
 	msg := tgbotapi.NewEditMessageTextAndMarkup(chatId, msgId, fmt.Sprintf("newCamp\ns:%s\ne:%s", rangeUnit.Start, rangeUnit.End),
 		tgbotapi.NewInlineKeyboardMarkup(
 			tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonData(fmt.Sprintf("start: %s", rangeUnit.Start), "setStartDate"),
-				tgbotapi.NewInlineKeyboardButtonData(fmt.Sprintf("end: %s", rangeUnit.End), "setEndDate"),
+				tgbotapi.NewInlineKeyboardButtonData(fmt.Sprintf("start: %s", rangeUnit.Start), "setStartDate\nsetStartDate"),
+				tgbotapi.NewInlineKeyboardButtonData(fmt.Sprintf("end: %s", rangeUnit.End), "setEndDate\nsetEndDate"),
 			),
 			tgbotapi.NewInlineKeyboardRow(
 				tgbotapi.NewInlineKeyboardButtonData("confirm", "createCamp"),
@@ -72,3 +72,5 @@ func CreateCamp(chatId int64, msgId int, self string, input string) (tgbotapi.Ch
 	database.CreateCamp(*rangeUnit)
 	return BackToMenu(chatId, msgId, input)
 }
+
+//callback
