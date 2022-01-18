@@ -2,10 +2,17 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
+	"log"
+	"strings"
+	"time"
 
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+
+	"github.com/ykyui/camp-jj/database"
 	_ "github.com/ykyui/camp-jj/database"
-	"github.com/ykyui/camp-jj/handleMsg"
+	"github.com/ykyui/camp-jj/tgBot"
 )
 
 type initBotConfig struct {
@@ -19,12 +26,60 @@ func main() {
 	if err := json.Unmarshal(data, &config); err != nil {
 		panic(err)
 	}
-	myBot := handleMsg.NewBot(config.TgToken)
-	myBot.HandleCommand("/campJJ", handleMsg.ShowMenu)
-	myBot.HandleCallback("newcamp", handleMsg.NewCamp)
-	myBot.HandleCallback("setStartDate", handleMsg.AskCampDate)
-	myBot.HandleCallback("setEndDate", handleMsg.AskCampDate)
-	myBot.HandleReply("setDate", handleMsg.SetDate)
-	myBot.HandleCallback("createCamp", handleMsg.CreateCamp)
-	myBot.RunBot()
+	bot, err := tgbotapi.NewBotAPI(config.TgToken)
+	if err != nil {
+		log.Panic(err)
+	}
+
+	bot.Debug = true
+
+	log.Printf("Authorized on account %s", bot.Self.UserName)
+
+	u := tgbotapi.NewUpdate(0)
+	u.Timeout = 60
+	updates := bot.GetUpdatesChan(u)
+	sectionHeap := make(map[int]*tgBot.MyBotSection)
+	for update := range updates {
+		if update.Message != nil {
+			chatId := update.Message.Chat.ID
+			msgId := update.Message.MessageID
+			input := update.Message.Text
+			if err := database.CheckValid(int(chatId)); err != nil {
+				fmt.Println(err)
+				continue
+			}
+			if update.Message.IsCommand() {
+				if msg, err := bot.Send(tgbotapi.NewMessage(chatId, time.Now().String())); err != nil {
+					fmt.Println(err)
+				} else {
+					newSection := tgBot.NewBotSection(int(chatId), msg.MessageID, bot)
+					sectionHeap[newSection.Msg_id] = newSection
+					go func() {
+						defer delete(sectionHeap, newSection.Msg_id)
+						newSection.Idle()
+					}()
+					switch strings.ToLower(input) {
+					case "/campjj":
+						sectionHeap[msg.MessageID].CallBackHandle("direct menu")
+					}
+				}
+			} else {
+				replyMsgId := update.Message.ReplyToMessage.MessageID
+				// replyMsg := update.Message.ReplyToMessage.Text
+				bot.Send(tgbotapi.NewDeleteMessage(chatId, replyMsgId))
+				bot.Send(tgbotapi.NewDeleteMessage(chatId, msgId))
+				for _, v := range sectionHeap {
+					if v.ReplyMsgId == replyMsgId {
+						v.ReplyHandle(input)
+					}
+				}
+			}
+
+		} else if update.CallbackQuery != nil {
+			// chatId := update.CallbackQuery.Message.Chat.ID
+			msgId := update.CallbackQuery.Message.MessageID
+			input := update.CallbackQuery.Data
+			sectionHeap[msgId].CallBackHandle(input)
+		}
+	}
 }

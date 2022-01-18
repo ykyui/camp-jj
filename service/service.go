@@ -14,3 +14,15 @@ func JsonToType(s string, v interface{}) error {
 	}
 	return nil
 }
+
+type RangeUnit struct {
+	Start string
+	End   string
+}
+
+// func (r *RangeUnit) SetStart(start string) {
+// 	r.Start = start
+// }
+// func (r *RangeUnit) SetEnd(end string) {
+// 	r.End = end
+// }
