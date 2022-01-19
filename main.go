@@ -58,9 +58,9 @@ func main() {
 						defer delete(sectionHeap, newSection.Msg_id)
 						newSection.Idle()
 					}()
-					switch strings.ToLower(input) {
-					case "/campjj":
-						sectionHeap[msg.MessageID].CallBackHandle("direct menu")
+					switch strings.ToLower(update.Message.Command()) {
+					case "campjj":
+						sectionHeap[msg.MessageID].CallBackHandle("direct menu", update.Message.From)
 					}
 				}
 			} else {
@@ -70,16 +70,20 @@ func main() {
 				bot.Send(tgbotapi.NewDeleteMessage(chatId, msgId))
 				for _, v := range sectionHeap {
 					if v.ReplyMsgId == replyMsgId {
-						v.ReplyHandle(input)
+						v.ReplyHandle(input, update.Message.From)
 					}
 				}
 			}
 
 		} else if update.CallbackQuery != nil {
-			// chatId := update.CallbackQuery.Message.Chat.ID
+			chatId := update.CallbackQuery.Message.Chat.ID
 			msgId := update.CallbackQuery.Message.MessageID
 			input := update.CallbackQuery.Data
-			sectionHeap[msgId].CallBackHandle(input)
+			if section, ok := sectionHeap[msgId]; ok {
+				section.CallBackHandle(input, update.CallbackQuery.From)
+			} else {
+				bot.Send(tgbotapi.NewDeleteMessage(chatId, msgId))
+			}
 		}
 	}
 }

@@ -7,24 +7,25 @@ import (
 	"github.com/ykyui/camp-jj/service"
 )
 
-func NewCamp(msgId int) service.RangeUnit {
-	rangeUnit := service.RangeUnit{}
-	redisDb.Set(fmt.Sprintf("newCamp_%d", msgId), service.TypeToJson(rangeUnit), time.Second*120)
-	return rangeUnit
-}
-
-func GetNewCamp(msgId int) (*service.RangeUnit, error) {
-	var rangeUnit service.RangeUnit
-	s, err := redisDb.Get(fmt.Sprintf("newCamp_%d", msgId)).Result()
+func updateCampInfo(id int) (*CampInfo, error) {
+	defer redisDb.Publish(fmt.Sprintf("camp_%d", id), nil)
+	redisKey := fmt.Sprintf("campInfo_%d", id)
+	campInfo, err := getCampInfo(id)
 	if err != nil {
 		return nil, err
 	}
-	if err = service.JsonToType(s, &rangeUnit); err != nil {
-		return nil, err
-	}
-	return &rangeUnit, nil
+	return campInfo, redisDb.Set(redisKey, service.TypeToJson(campInfo), time.Second*120).Err()
 }
 
-func UpdateNewCamp(msgId int, rangeUnit service.RangeUnit) {
-	redisDb.Set(fmt.Sprintf("newCamp_%d", msgId), service.TypeToJson(rangeUnit), time.Second*120)
+func GetCampInfo(id int) (campInfo *CampInfo, err error) {
+	redisKey := fmt.Sprintf("campInfo_%d", id)
+	camp, err := redisDb.Get(redisKey).Result()
+	if err == nil {
+		err = service.JsonToType(camp, &campInfo)
+		if err == nil {
+			redisDb.Expire(redisKey, time.Second*120)
+			return
+		}
+	}
+	return updateCampInfo(id)
 }

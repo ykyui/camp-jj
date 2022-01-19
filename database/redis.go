@@ -37,6 +37,19 @@ func init() {
 	redisDb = client
 }
 
-func GetMsgById(msgId int) (string, error) {
-	return redisDb.Get(fmt.Sprintf("msg_%d", msgId)).Result()
+func SubCamp(campId int, update chan<- bool) chan<- bool {
+	disSuc := make(chan bool, 1)
+	sub := redisDb.Subscribe(fmt.Sprintf("camp_%d", campId))
+	go func() {
+		defer fmt.Println("close redisChan")
+		for {
+			<-sub.Channel()
+			update <- true
+		}
+	}()
+	go func() {
+		<-disSuc
+		sub.Close()
+	}()
+	return disSuc
 }

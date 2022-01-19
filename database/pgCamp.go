@@ -3,10 +3,13 @@ package database
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 
 	"regexp"
 
 	"github.com/ykyui/camp-jj/service"
+
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
 func CreateCamp(ru service.RangeUnit) error {
@@ -36,7 +39,7 @@ type CampInfo struct {
 	RangeUnit     service.RangeUnit
 	FoodHeap      map[int]Food
 	EquipmentHeap map[int]Item
-	memberHeap    map[int]*Member
+	MemberHeap    map[int]*Member
 }
 
 type Food struct {
@@ -57,14 +60,46 @@ type Member struct {
 	Equipment []int
 }
 
-func GetCampList() (result map[int]*CampInfo, err error) {
+func (c *CampInfo) ToMsg() (result string) {
+	result = fmt.Sprintf("campId: %d\ndate: %s To %s\n", c.Id, c.RangeUnit.Start, c.RangeUnit.End)
+
+	result += "member\n"
+	for _, v := range c.MemberHeap {
+		result += fmt.Sprintf("name: %s %s\n", v.Name, v.JoinDate)
+	}
+
+	result += "food\n"
+	for _, v := range c.FoodHeap {
+		result += fmt.Sprintf("name: %s\n", v.Name)
+		for _, v := range v.Material {
+			var bringName string
+			if bring, ok := c.MemberHeap[v.WhoBring]; ok {
+				bringName = bring.Name
+			}
+			result += fmt.Sprintf("material: %s %s\n", v.Name, bringName)
+		}
+	}
+
+	result += "equipment \n"
+	for _, v := range c.EquipmentHeap {
+		var bringName string
+		if bring, ok := c.MemberHeap[v.WhoBring]; ok {
+			bringName = bring.Name
+		}
+		result += fmt.Sprintf(`
+		name: %s %s
+		`, v.Name, bringName)
+	}
+	return
+}
+
+func GetCampList() (result []*CampInfo, err error) {
 	stmt, err := pgDb.Prepare(`select id, TO_CHAR(start_date, 'YYYY-MM-DD'), TO_CHAR(end_date, 'YYYY-MM-DD') from camp where current_date - INTERVAL '7 day' < end_date`)
 	if err != nil {
 		return nil, err
 	}
 	defer stmt.Close()
 
-	result = make(map[int]*CampInfo)
 	if rows, err := stmt.Query(); err != nil {
 		return nil, err
 	} else {
@@ -78,20 +113,20 @@ func GetCampList() (result map[int]*CampInfo, err error) {
 			if err = rows.Scan(&id, &start, &end); err != nil {
 				return nil, err
 			}
-			result[int(id.Int64)] = &CampInfo{int(id.Int64), service.RangeUnit{Start: start.String, End: end.String}, nil, nil, nil}
+			result = append(result, &CampInfo{int(id.Int64), service.RangeUnit{Start: start.String, End: end.String}, nil, nil, nil})
 		}
 	}
 	return result, nil
 }
 
-func GetCampInfo(id int) (*CampInfo, error) {
-	stmt_camp_date, err := pgDb.Prepare(`select start_date, end_date from camp where id = $1`)
+func getCampInfo(id int) (*CampInfo, error) {
+	stmt_camp_date, err := pgDb.Prepare(`select TO_CHAR(start_date, 'YYYY-MM-DD'), TO_CHAR(end_date, 'YYYY-MM-DD') from camp where id = $1`)
 	if err != nil {
 		return nil, err
 	}
 	defer stmt_camp_date.Close()
 
-	stmt_camp_user, err := pgDb.Prepare(`select user_id, join_date, user_name from camp_member left join group_user on user_id = id where camp_id = $1`)
+	stmt_camp_user, err := pgDb.Prepare(`select user_id, TO_CHAR(join_date, 'YYYY-MM-DD'), user_name from camp_member left join group_user on user_id = id where camp_id = $1`)
 	if err != nil {
 		return nil, err
 	}
@@ -139,7 +174,7 @@ func GetCampInfo(id int) (*CampInfo, error) {
 			if err = rows.Scan(&user_id, &join_date, &user_name); err != nil {
 				return nil, err
 			}
-			campInfo.memberHeap[int(user_id.Int64)] = &Member{user_name.String, join_date.String, []int{}, []int{}}
+			campInfo.MemberHeap[int(user_id.Int64)] = &Member{user_name.String, join_date.String, []int{}, []int{}}
 		}
 
 	}
@@ -164,7 +199,7 @@ func GetCampInfo(id int) (*CampInfo, error) {
 			}
 			campInfo.FoodHeap[int(food_id.Int64)].Material[int(food_sub_id.Int64)] = Item{food_sub_name.String, int(bring_user_id.Int64)}
 			if bring_user_id.Valid {
-				campInfo.memberHeap[int(bring_user_id.Int64)].Food = append(campInfo.memberHeap[int(bring_user_id.Int64)].Food, int(food_sub_id.Int64))
+				campInfo.MemberHeap[int(bring_user_id.Int64)].Food = append(campInfo.MemberHeap[int(bring_user_id.Int64)].Food, int(food_sub_id.Int64))
 			}
 		}
 	}
@@ -184,10 +219,87 @@ func GetCampInfo(id int) (*CampInfo, error) {
 			}
 			campInfo.EquipmentHeap[int(equipment_id.Int64)] = Item{equipment_name.String, int(bring_user_id.Int64)}
 			if bring_user_id.Valid {
-				campInfo.memberHeap[int(bring_user_id.Int64)].Equipment = append(campInfo.memberHeap[int(bring_user_id.Int64)].Food, int(equipment_id.Int64))
+				campInfo.MemberHeap[int(bring_user_id.Int64)].Equipment = append(campInfo.MemberHeap[int(bring_user_id.Int64)].Food, int(equipment_id.Int64))
 			}
 		}
 	}
 
 	return campInfo, nil
+}
+
+func Join(campId int, user *tgbotapi.User, join_date string) error {
+	dateReg, _ := regexp.Compile(`^(19[0-9]{2}|2[0-9]{3})(0[1-9]|1[012])([123]0|[012][1-9]|31)$`)
+	if !dateReg.Match([]byte(join_date)) {
+		return errors.New("dateFormatError")
+	}
+	tx, err := pgDb.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	stmt_check_input, err := tx.Prepare(`select count(*) from camp where id = $1 and TO_DATE($2,'YYYYMMDD') between start_date and end_date`)
+	if err != nil {
+		return err
+	}
+	defer stmt_check_input.Close()
+	stmt_insert_group_user, err := tx.Prepare(`insert into group_user (id, user_name) values ($1, $2) 
+	ON CONFLICT (id) DO UPDATE 
+	SET id = excluded.id, 
+	user_name = excluded.user_name`)
+	if err != nil {
+		return err
+	}
+	defer stmt_insert_group_user.Close()
+
+	stmt_insert_camp_member, err := tx.Prepare(`insert into camp_member (camp_id, user_id, join_date) values ($1, $2, $3)
+	ON CONFLICT (camp_id, user_id) DO UPDATE 
+	SET join_date = excluded.join_date`)
+	if err != nil {
+		return err
+	}
+	defer stmt_insert_camp_member.Close()
+
+	var count sql.NullInt64
+	if err = stmt_check_input.QueryRow(campId, join_date).Scan(&count); err != nil {
+		return err
+	} else if count.Int64 != 1 {
+		return errors.New("not within")
+	}
+
+	if _, err = stmt_insert_group_user.Exec(user.ID, user.UserName); err != nil {
+		return err
+	}
+	if _, err = stmt_insert_camp_member.Exec(campId, user.ID, join_date); err != nil {
+		return err
+	}
+
+	if err = tx.Commit(); err != nil {
+		return err
+	}
+	updateCampInfo(campId)
+	return nil
+}
+
+func Quit(campId int, user *tgbotapi.User) error {
+	tx, err := pgDb.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	stmt_delete, err := tx.Prepare(`delete from camp_member where camp_id = $1 and user_id = $2`)
+	if err != nil {
+		return err
+	}
+	defer stmt_delete.Close()
+
+	if _, err = stmt_delete.Exec(campId, user.ID); err != nil {
+		return err
+	}
+
+	if err = tx.Commit(); err != nil {
+		return err
+	}
+	updateCampInfo(campId)
+	return nil
 }
