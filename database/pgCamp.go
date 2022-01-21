@@ -2,10 +2,7 @@ package database
 
 import (
 	"database/sql"
-	"errors"
 	"fmt"
-
-	"regexp"
 
 	"github.com/ykyui/camp-jj/service"
 
@@ -13,17 +10,13 @@ import (
 )
 
 func CreateCamp(ru service.RangeUnit) error {
-	dateReg, _ := regexp.Compile(`^(19[0-9]{2}|2[0-9]{3})(0[1-9]|1[012])([123]0|[012][1-9]|31)$`)
-	if !dateReg.Match([]byte(ru.Start)) || !dateReg.Match([]byte(ru.End)) {
-		return errors.New("dateFormatError")
-	}
 	tx, err := pgDb.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 	stmt, err := tx.Prepare(`insert into camp (id, start_date, end_date) 
-	select coalesce(max(id),0)+1,TO_DATE($1,'YYYYMMDD'),TO_DATE($2,'YYYYMMDD') from camp`)
+	select coalesce(max(id),0)+1,TO_DATE($1,'YYYY-MM-DD'),TO_DATE($2,'YYYY-MM-DD') from camp`)
 	if err != nil {
 		return err
 	}
@@ -233,20 +226,12 @@ func getCampInfo(id int) (*CampInfo, error) {
 }
 
 func Join(campId int, user *tgbotapi.User, join_date string) error {
-	dateReg, _ := regexp.Compile(`^(19[0-9]{2}|2[0-9]{3})(0[1-9]|1[012])([123]0|[012][1-9]|31)$`)
-	if !dateReg.Match([]byte(join_date)) {
-		return errors.New("dateFormatError")
-	}
 	tx, err := pgDb.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	stmt_check_input, err := tx.Prepare(`select count(*) from camp where id = $1 and TO_DATE($2,'YYYYMMDD') between start_date and end_date`)
-	if err != nil {
-		return err
-	}
-	defer stmt_check_input.Close()
+
 	stmt_insert_group_user, err := tx.Prepare(`insert into group_user (id, user_name) values ($1, $2) 
 	ON CONFLICT (id) DO UPDATE 
 	SET id = excluded.id, 
@@ -263,13 +248,6 @@ func Join(campId int, user *tgbotapi.User, join_date string) error {
 		return err
 	}
 	defer stmt_insert_camp_member.Close()
-
-	var count sql.NullInt64
-	if err = stmt_check_input.QueryRow(campId, join_date).Scan(&count); err != nil {
-		return err
-	} else if count.Int64 != 1 {
-		return errors.New("not within")
-	}
 
 	if _, err = stmt_insert_group_user.Exec(user.ID, user.UserName); err != nil {
 		return err
@@ -336,23 +314,13 @@ func AddEquipment(campId int, equipmentList []string, user *tgbotapi.User) error
 }
 
 func AddFood(campId int, date string, food_name string, ingredients []string, user *tgbotapi.User) error {
-	dateReg, _ := regexp.Compile(`^(19[0-9]{2}|2[0-9]{3})(0[1-9]|1[012])([123]0|[012][1-9]|31)$`)
-	if !dateReg.Match([]byte(date)) {
-		return errors.New("dateFormatError")
-	}
 	tx, err := pgDb.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-	stmt_check_date, err := tx.Prepare(`select count(*) from camp where id = $1 and TO_DATE($2,'YYYYMMDD') between start_date and end_date`)
-	if err != nil {
-		return err
-	}
-	defer stmt_check_date.Close()
-
-	stmt_insert_food, err := tx.Prepare(`insert into camp_food (camp_id, name, date, created_by) values ($1, $2, TO_DATE($3,'YYYYMMDD'), $4) RETURNING id`)
+	stmt_insert_food, err := tx.Prepare(`insert into camp_food (camp_id, name, date, created_by) values ($1, $2, TO_DATE($3,'YYYY-MM-DD'), $4) RETURNING id`)
 	if err != nil {
 		return err
 	}
@@ -364,15 +332,8 @@ func AddFood(campId int, date string, food_name string, ingredients []string, us
 	}
 	defer stmt_insert_ingredients.Close()
 	var (
-		checkDate sql.NullInt64
 		newFoodId sql.NullInt64
 	)
-
-	if err := stmt_check_date.QueryRow(campId, date).Scan(&checkDate); err != nil {
-		return err
-	} else if checkDate.Int64 != 1 {
-		return errors.New("not within")
-	}
 
 	if err = stmt_insert_food.QueryRow(campId, food_name, date, user.ID).Scan(&newFoodId); err != nil {
 		return err

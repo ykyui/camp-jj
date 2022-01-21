@@ -77,24 +77,15 @@ func (s *MyBotSection) Idle() {
 
 func (b *MyBotSection) ReplyHandle(input string) (result tgbotapi.Chattable) {
 	switch b.Action {
-	case "setStart":
-		b.Contact.(*service.RangeUnit).Start = input
-	case "setEnd":
-		b.Contact.(*service.RangeUnit).End = input
-	case "join":
-		if err := database.Join(b.Camp_id, b.User, input); err != nil {
-			msg, _ := b.bot.Send(tgbotapi.NewMessage(int64(b.Chat_id), err.Error()))
-			b.ReplyMsgId = msg.MessageID
-		}
 	case "addEquipment":
 		if err := database.AddEquipment(b.Camp_id, strings.Split(input, "\n"), b.User); err != nil {
 			msg, _ := b.bot.Send(tgbotapi.NewMessage(int64(b.Chat_id), err.Error()))
 			b.ReplyMsgId = msg.MessageID
 		}
-	case "addFood":
+	case "addfood":
 		temp := strings.Split(input, "\n")
-		if len(temp) < 2 {
-		} else if err := database.AddFood(b.Camp_id, temp[0], temp[1], temp[2:], b.User); err != nil {
+		if len(temp) < 1 {
+		} else if err := database.AddFood(b.Camp_id, b.Contact.(string), temp[0], temp[1:], b.User); err != nil {
 			msg, _ := b.bot.Send(tgbotapi.NewMessage(int64(b.Chat_id), err.Error()))
 			b.ReplyMsgId = msg.MessageID
 		}
@@ -111,7 +102,7 @@ func (b *MyBotSection) CallBackHandle(input string) {
 		b.Path = append(b.Path, action[1])
 		switch strings.ToLower(b.current()) {
 		case "newcamp":
-			b.Contact = &service.RangeUnit{Start: "yyyymmdd", End: "yyyymmdd"}
+			b.Contact = &service.RangeUnit{Start: "", End: ""}
 		case "subcamp":
 			b.Camp_id, _ = strconv.Atoi(action[2])
 			b.DisSub = database.SubCamp(b.Camp_id, b.update)
@@ -136,12 +127,35 @@ func (b *MyBotSection) CallBackHandle(input string) {
 			}
 		case "quit":
 			database.Quit(b.Camp_id, b.User)
-		case "setStart", "setEnd", "join":
-			replyMsg = "reply this message\nyyyymmdd eg.19991231"
+		case "previousMonth":
+			date, _ := time.Parse("2006-01-02", b.Contact.(*service.RangeUnit).Start)
+			b.Contact.(*service.RangeUnit).Start = date.AddDate(0, -1, 0).Format("2006-01-02")
+			b.Contact.(*service.RangeUnit).End = b.Contact.(*service.RangeUnit).Start
+		case "nextMonth":
+			date, _ := time.Parse("2006-01-02", b.Contact.(*service.RangeUnit).Start)
+			b.Contact.(*service.RangeUnit).Start = date.AddDate(0, 1, 0).Format("2006-01-02")
+			b.Contact.(*service.RangeUnit).End = b.Contact.(*service.RangeUnit).Start
+		case "setStart":
+			b.Contact.(*service.RangeUnit).Start = action[2]
+			b.Contact.(*service.RangeUnit).End = b.Contact.(*service.RangeUnit).Start
+		case "setEnd":
+			date, _ := time.Parse("2006-01-02", b.Contact.(*service.RangeUnit).Start)
+			day, _ := strconv.Atoi(action[2])
+			b.Contact.(*service.RangeUnit).End = date.AddDate(0, 0, day).Format("2006-01-02")
+		case "join":
+			if err := database.Join(b.Camp_id, b.User, action[2]); err != nil {
+				msg, _ := b.bot.Send(tgbotapi.NewMessage(int64(b.Chat_id), err.Error()))
+				b.ReplyMsgId = msg.MessageID
+			} else {
+				b.back()
+			}
 		case "addEquipment":
 			replyMsg = "reply this message\nequipment name\nequipment name\n.\n.\n.\n."
-		case "addFood":
-			replyMsg = "reply this message\ndate yyyymmdd\nfood name\ningredients\ningredients\n.\n.\n.\n."
+		case "addfood":
+			b.Contact = action[2]
+			replyMsg = "reply this message\nfood name\ningredients\ningredients\n.\n.\n.\n."
+		case "dump":
+			return
 		}
 		if replyMsg != "" {
 			msg := tgbotapi.NewMessage(int64(b.Chat_id), replyMsg)
@@ -154,6 +168,7 @@ func (b *MyBotSection) CallBackHandle(input string) {
 	}
 
 	b.update <- true
+
 }
 
 func (b *MyBotSection) updateMsg() (tgbotapi.Chattable, error) {
@@ -166,8 +181,8 @@ func (b *MyBotSection) updateMsg() (tgbotapi.Chattable, error) {
 		}
 		return tgbotapi.NewEditMessageTextAndMarkup(int64(b.Chat_id), b.Msg_id, fmt.Sprintf("%s\nmenu", userName), kb), nil
 	case "newcamp":
-		kb, _ := newCampKb()
 		temp := b.Contact.(*service.RangeUnit)
+		kb, _ := newCampKb(b.Action, temp)
 		return tgbotapi.NewEditMessageTextAndMarkup(int64(b.Chat_id), b.Msg_id, fmt.Sprintf("%s\nnewCamp\ns: %s\ne: %s", userName, temp.Start, temp.End), kb), nil
 	case "subcamp":
 		camp, err := database.GetCampInfo(b.Camp_id)
@@ -175,12 +190,18 @@ func (b *MyBotSection) updateMsg() (tgbotapi.Chattable, error) {
 			return nil, err
 		}
 		return tgbotapi.NewEditMessageTextAndMarkup(int64(b.Chat_id), b.Msg_id, userName+"\n"+camp.ToMsg(), campMainKb()), nil
+	case "join":
+		camp, err := database.GetCampInfo(b.Camp_id)
+		if err != nil {
+			return nil, err
+		}
+		return tgbotapi.NewEditMessageTextAndMarkup(int64(b.Chat_id), b.Msg_id, userName+"\n"+camp.ToMsg(), joinCampKb(&camp.RangeUnit)), nil
 	case "food":
 		camp, err := database.GetCampInfo(b.Camp_id)
 		if err != nil {
 			return nil, err
 		}
-		return tgbotapi.NewEditMessageTextAndMarkup(int64(b.Chat_id), b.Msg_id, userName+"\n"+camp.ToMsg(), campFoodKb()), nil
+		return tgbotapi.NewEditMessageTextAndMarkup(int64(b.Chat_id), b.Msg_id, userName+"\n"+camp.ToMsg(), campFoodKb(&camp.RangeUnit)), nil
 	case "equipment":
 		camp, err := database.GetCampInfo(b.Camp_id)
 		if err != nil {
