@@ -43,9 +43,10 @@ type CampInfo struct {
 }
 
 type Food struct {
-	Id       int
-	Name     string
-	Material map[int]Item
+	Id          int
+	Name        string
+	Date        string
+	Ingredients map[int]Item
 }
 
 type Item struct {
@@ -68,27 +69,30 @@ func (c *CampInfo) ToMsg() (result string) {
 		result += fmt.Sprintf("name: %s %s\n", v.Name, v.JoinDate)
 	}
 
-	result += "food\n"
+	result += "\nfood\n"
 	for _, v := range c.FoodHeap {
-		result += fmt.Sprintf("name: %s\n", v.Name)
-		for _, v := range v.Material {
+		result += fmt.Sprintf("name: %s %s\n", v.Name, v.Date)
+		for _, v := range v.Ingredients {
 			var bringName string
 			if bring, ok := c.MemberHeap[v.WhoBring]; ok {
 				bringName = bring.Name
 			}
-			result += fmt.Sprintf("material: %s %s\n", v.Name, bringName)
+			result += fmt.Sprintf("ingredients: %s %s\n", v.Name, bringName)
 		}
+		result += "\n"
 	}
 
-	result += "equipment \n"
+	result += "\nequipment \n"
 	for _, v := range c.EquipmentHeap {
-		var bringName string
+		var (
+			bringName    string
+			userJoinDate string
+		)
 		if bring, ok := c.MemberHeap[v.WhoBring]; ok {
 			bringName = bring.Name
+			userJoinDate = bring.JoinDate
 		}
-		result += fmt.Sprintf(`
-		name: %s %s
-		`, v.Name, bringName)
+		result += fmt.Sprintf("name: %s %s %s\n", v.Name, bringName, userJoinDate)
 	}
 	return
 }
@@ -132,9 +136,9 @@ func getCampInfo(id int) (*CampInfo, error) {
 	}
 	defer stmt_camp_user.Close()
 
-	stmt_camp_food, err := pgDb.Prepare(`select cf.id, cf.name, cfm.id, cfm.name, cub.user_id
+	stmt_camp_food, err := pgDb.Prepare(`select cf.id, cf.name, TO_CHAR(cf.date, 'YYYY-MM-DD'), cfm.id, cfm.name, cub.user_id
 	from camp_food cf 
-	left join camp_food_meterial cfm 
+	left join camp_food_ingredients cfm 
 		left join camp_user_bring cub on cfm.id = cub.item_id and cub.camp_id = cfm.camp_id and cub.type = 1 
 	on cf.id = cfm.food_id and cf.camp_id = cfm.camp_id
 	where cf.camp_id = $1`)
@@ -186,18 +190,19 @@ func getCampInfo(id int) (*CampInfo, error) {
 		var (
 			food_id       sql.NullInt64
 			food_name     sql.NullString
+			food_date     sql.NullString
 			food_sub_id   sql.NullInt64
 			food_sub_name sql.NullString
 			bring_user_id sql.NullInt64
 		)
 		for rows.Next() {
-			if err := rows.Scan(&food_id, &food_name, &food_sub_id, &food_sub_name, &bring_user_id); err != nil {
+			if err := rows.Scan(&food_id, &food_name, &food_date, &food_sub_id, &food_sub_name, &bring_user_id); err != nil {
 				return nil, err
 			}
 			if _, ok := campInfo.FoodHeap[int(food_id.Int64)]; !ok {
-				campInfo.FoodHeap[int(food_id.Int64)] = Food{int(food_id.Int64), food_name.String, make(map[int]Item)}
+				campInfo.FoodHeap[int(food_id.Int64)] = Food{int(food_id.Int64), food_name.String, food_date.String, make(map[int]Item)}
 			}
-			campInfo.FoodHeap[int(food_id.Int64)].Material[int(food_sub_id.Int64)] = Item{food_sub_name.String, int(bring_user_id.Int64)}
+			campInfo.FoodHeap[int(food_id.Int64)].Ingredients[int(food_sub_id.Int64)] = Item{food_sub_name.String, int(bring_user_id.Int64)}
 			if bring_user_id.Valid {
 				campInfo.MemberHeap[int(bring_user_id.Int64)].Food = append(campInfo.MemberHeap[int(bring_user_id.Int64)].Food, int(food_sub_id.Int64))
 			}
@@ -295,6 +300,87 @@ func Quit(campId int, user *tgbotapi.User) error {
 
 	if _, err = stmt_delete.Exec(campId, user.ID); err != nil {
 		return err
+	}
+
+	if err = tx.Commit(); err != nil {
+		return err
+	}
+	updateCampInfo(campId)
+	return nil
+}
+
+func AddEquipment(campId int, equipmentList []string, user *tgbotapi.User) error {
+	tx, err := pgDb.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	stmt_insert, err := tx.Prepare(`insert into camp_equipment (camp_id, name, created_by) values ($1, $2, $3)`)
+	if err != nil {
+		return err
+	}
+	defer stmt_insert.Close()
+
+	for _, v := range equipmentList {
+		if _, err = stmt_insert.Exec(campId, v, user.ID); err != nil {
+			return err
+		}
+	}
+
+	if err = tx.Commit(); err != nil {
+		return err
+	}
+	updateCampInfo(campId)
+	return nil
+}
+
+func AddFood(campId int, date string, food_name string, ingredients []string, user *tgbotapi.User) error {
+	dateReg, _ := regexp.Compile(`^(19[0-9]{2}|2[0-9]{3})(0[1-9]|1[012])([123]0|[012][1-9]|31)$`)
+	if !dateReg.Match([]byte(date)) {
+		return errors.New("dateFormatError")
+	}
+	tx, err := pgDb.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	stmt_check_date, err := tx.Prepare(`select count(*) from camp where id = $1 and TO_DATE($2,'YYYYMMDD') between start_date and end_date`)
+	if err != nil {
+		return err
+	}
+	defer stmt_check_date.Close()
+
+	stmt_insert_food, err := tx.Prepare(`insert into camp_food (camp_id, name, date, created_by) values ($1, $2, TO_DATE($3,'YYYYMMDD'), $4) RETURNING id`)
+	if err != nil {
+		return err
+	}
+	defer stmt_insert_food.Close()
+
+	stmt_insert_ingredients, err := tx.Prepare(`insert into camp_food_ingredients (camp_id, food_id, name) values ($1, $2, $3)`)
+	if err != nil {
+		return err
+	}
+	defer stmt_insert_ingredients.Close()
+	var (
+		checkDate sql.NullInt64
+		newFoodId sql.NullInt64
+	)
+
+	if err := stmt_check_date.QueryRow(campId, date).Scan(&checkDate); err != nil {
+		return err
+	} else if checkDate.Int64 != 1 {
+		return errors.New("not within")
+	}
+
+	if err = stmt_insert_food.QueryRow(campId, food_name, date, user.ID).Scan(&newFoodId); err != nil {
+		return err
+	}
+	for _, v := range ingredients {
+		if _, err = stmt_insert_ingredients.Exec(campId, newFoodId, v); err != nil {
+			return err
+		}
 	}
 
 	if err = tx.Commit(); err != nil {

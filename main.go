@@ -44,15 +44,17 @@ func main() {
 			chatId := update.Message.Chat.ID
 			msgId := update.Message.MessageID
 			input := update.Message.Text
+			user := update.Message.From
 			if err := database.CheckValid(int(chatId)); err != nil {
 				fmt.Println(err)
 				continue
 			}
 			if update.Message.IsCommand() {
+				bot.Send(tgbotapi.NewDeleteMessage(chatId, msgId))
 				if msg, err := bot.Send(tgbotapi.NewMessage(chatId, time.Now().String())); err != nil {
 					fmt.Println(err)
 				} else {
-					newSection := tgBot.NewBotSection(int(chatId), msg.MessageID, bot)
+					newSection := tgBot.NewBotSection(user, int(chatId), msg.MessageID, bot)
 					sectionHeap[newSection.Msg_id] = newSection
 					go func() {
 						defer delete(sectionHeap, newSection.Msg_id)
@@ -60,17 +62,19 @@ func main() {
 					}()
 					switch strings.ToLower(update.Message.Command()) {
 					case "campjj":
-						sectionHeap[msg.MessageID].CallBackHandle("direct menu", update.Message.From)
+						sectionHeap[msg.MessageID].CallBackHandle("direct menu")
 					}
 				}
-			} else {
+			} else if update.Message.ReplyToMessage != nil {
 				replyMsgId := update.Message.ReplyToMessage.MessageID
 				// replyMsg := update.Message.ReplyToMessage.Text
-				bot.Send(tgbotapi.NewDeleteMessage(chatId, replyMsgId))
-				bot.Send(tgbotapi.NewDeleteMessage(chatId, msgId))
 				for _, v := range sectionHeap {
 					if v.ReplyMsgId == replyMsgId {
-						v.ReplyHandle(input, update.Message.From)
+						bot.Send(tgbotapi.NewDeleteMessage(chatId, msgId))
+						if user.ID == v.User.ID {
+							bot.Send(tgbotapi.NewDeleteMessage(chatId, replyMsgId))
+							v.ReplyHandle(input)
+						}
 					}
 				}
 			}
@@ -80,7 +84,9 @@ func main() {
 			msgId := update.CallbackQuery.Message.MessageID
 			input := update.CallbackQuery.Data
 			if section, ok := sectionHeap[msgId]; ok {
-				section.CallBackHandle(input, update.CallbackQuery.From)
+				if int(section.User.ID) == int(update.CallbackQuery.From.ID) {
+					section.CallBackHandle(input)
+				}
 			} else {
 				bot.Send(tgbotapi.NewDeleteMessage(chatId, msgId))
 			}
