@@ -59,61 +59,78 @@ func newCampKb(action string, ru *service.RangeUnit) (tgbotapi.InlineKeyboardMar
 		result.InlineKeyboard[len(result.InlineKeyboard)-1] = append(result.InlineKeyboard[len(result.InlineKeyboard)-1], tgbotapi.NewInlineKeyboardButtonData(strconv.Itoa(i), fmt.Sprintf("action setEnd %d", i)))
 	}
 
-	result.InlineKeyboard = append(result.InlineKeyboard, tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("confirm", "action confirm"), tgbotapi.NewInlineKeyboardButtonData("back", "action back")))
+	result.InlineKeyboard = append(result.InlineKeyboard, tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("confirm", "action confirm"), tgbotapi.NewInlineKeyboardButtonData("🔙", "action back")))
 
 	return result, nil
 }
 
 func campMainKb() tgbotapi.InlineKeyboardMarkup {
 	return tgbotapi.NewInlineKeyboardMarkup(
-		tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("join?", "direct join"), tgbotapi.NewInlineKeyboardButtonData("quit", "action quit")),
-		tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("food", "direct food"), tgbotapi.NewInlineKeyboardButtonData("equipment", "direct equipment")),
-		tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("back", "action back")),
+		tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("🤝", "direct join"), tgbotapi.NewInlineKeyboardButtonData("👋", "action quit")),
+		tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("🍻🍷🍺", "direct food"), tgbotapi.NewInlineKeyboardButtonData("🎒", "direct equipment")),
+		tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("🔙", "action back")),
 	)
 }
 
 func joinCampKb(ru *service.RangeUnit) tgbotapi.InlineKeyboardMarkup {
 	kb := tgbotapi.NewInlineKeyboardMarkup()
 
-	for _, v := range betweenDayList(ru) {
+	for _, v := range service.BetweenDayList(ru) {
 		kb.InlineKeyboard = append(kb.InlineKeyboard, tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData(v, "action join "+v)))
 	}
 
-	kb.InlineKeyboard = append(kb.InlineKeyboard, tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("back", "action back")))
+	kb.InlineKeyboard = append(kb.InlineKeyboard, tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("🔙", "action back")))
 
 	return kb
 }
 
-func campEquipmentKb() tgbotapi.InlineKeyboardMarkup {
-	return tgbotapi.NewInlineKeyboardMarkup(
-		tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("add", "action addEquipment") /* tgbotapi.NewInlineKeyboardButtonData("delete", "direct deleteEquipment") */),
-		// tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("bring", "direct bringEquipment")),
-		tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("back", "action back")),
-	)
-}
-
-func bringEquipmentKb(userId int, equipment map[int]database.Item) tgbotapi.InlineKeyboardMarkup {
+func campEquipmentKb(ru *service.RangeUnit, equipment map[string][]*database.Item, userId int) tgbotapi.InlineKeyboardMarkup {
 	kb := tgbotapi.NewInlineKeyboardMarkup()
-	for id, v := range equipment {
-		if len(kb.InlineKeyboard) == 0 || len(kb.InlineKeyboard[len(kb.InlineKeyboard)-1])%2 == 0 {
-			kb.InlineKeyboard = append(kb.InlineKeyboard, tgbotapi.NewInlineKeyboardRow())
-		}
-		if v.WhoBring == 0 {
-			kb.InlineKeyboard[len(kb.InlineKeyboard)-1] = append(kb.InlineKeyboard[len(kb.InlineKeyboard)-1], tgbotapi.NewInlineKeyboardButtonData("bring "+v.Name, fmt.Sprintf("action bringEquipment %d", id)))
-		} else if v.WhoBring == userId {
-			kb.InlineKeyboard[len(kb.InlineKeyboard)-1] = append(kb.InlineKeyboard[len(kb.InlineKeyboard)-1], tgbotapi.NewInlineKeyboardButtonData("drop "+v.Name, fmt.Sprintf("action bringEquipment %d", id)))
+	for _, v := range service.BetweenDayList(ru) {
+		kb.InlineKeyboard = append(kb.InlineKeyboard, tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData(fmt.Sprintf("%s ➕ 🎒 ", v), "action addequipment "+v)))
+		if e, ok := equipment[v]; ok {
+			for i, v := range e {
+				if i%2 == 0 {
+					kb.InlineKeyboard = append(kb.InlineKeyboard, tgbotapi.NewInlineKeyboardRow())
+				}
+				index := len(kb.InlineKeyboard) - 1
+				if v.WhoBring == userId {
+					kb.InlineKeyboard[index] = append(kb.InlineKeyboard[index], tgbotapi.NewInlineKeyboardButtonData(fmt.Sprintf("❌ %s", v.Name), fmt.Sprintf("action dropequipment %d", v.Id)))
+				} else if v.WhoBring == 0 {
+					kb.InlineKeyboard[index] = append(kb.InlineKeyboard[index], tgbotapi.NewInlineKeyboardButtonData(fmt.Sprintf("✅ %s", v.Name), fmt.Sprintf("action bringequipment %d", v.Id)))
+				}
+			}
 		}
 	}
-	kb.InlineKeyboard = append(kb.InlineKeyboard, tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("back", "action back")))
+
+	kb.InlineKeyboard = append(kb.InlineKeyboard, tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("🔙", "action back")))
 	return kb
 }
 
-func campFoodKb(ru *service.RangeUnit) tgbotapi.InlineKeyboardMarkup {
+func campFoodKb(ru *service.RangeUnit, food map[string][]*database.Food, userId int) tgbotapi.InlineKeyboardMarkup {
 	kb := tgbotapi.NewInlineKeyboardMarkup()
-	for _, v := range betweenDayList(ru) {
-		kb.InlineKeyboard = append(kb.InlineKeyboard, tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("food for "+v, "action addfood "+v)))
+	for _, v := range service.BetweenDayList(ru) {
+		kb.InlineKeyboard = append(kb.InlineKeyboard, tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData(fmt.Sprintf("%s ➕ 🍳 ", v), "action addfood "+v)))
+		if f, ok := food[v]; ok {
+			count := 0
+			for _, v := range f {
+				for _, v := range v.Ingredients {
+					if count%2 == 0 {
+						kb.InlineKeyboard = append(kb.InlineKeyboard, tgbotapi.NewInlineKeyboardRow())
+					}
+					count++
+					index := len(kb.InlineKeyboard) - 1
+					if v.WhoBring == userId {
+						kb.InlineKeyboard[index] = append(kb.InlineKeyboard[index], tgbotapi.NewInlineKeyboardButtonData(fmt.Sprintf("❌ %s", v.Name), fmt.Sprintf("action dropfood %d", v.Id)))
+					} else if v.WhoBring == 0 {
+						kb.InlineKeyboard[index] = append(kb.InlineKeyboard[index], tgbotapi.NewInlineKeyboardButtonData(fmt.Sprintf("✅ %s", v.Name), fmt.Sprintf("action bringfood %d", v.Id)))
+					}
+				}
+			}
+		}
 	}
-	kb.InlineKeyboard = append(kb.InlineKeyboard, tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("back", "action back")))
+
+	kb.InlineKeyboard = append(kb.InlineKeyboard, tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("🔙", "action back")))
 	return kb
 }
 
@@ -136,17 +153,4 @@ func monthPattern(d time.Time) [][]string {
 	}
 
 	return result
-}
-
-func betweenDayList(ru *service.RangeUnit) []string {
-	result := make([]string, 0)
-	s, _ := time.Parse("2006-01-02", ru.Start)
-	e, _ := time.Parse("2006-01-02", ru.End)
-	for {
-		result = append(result, s.Format("2006-01-02"))
-		s = s.AddDate(0, 0, 1)
-		if e.Sub(s).Hours() < 0 {
-			return result
-		}
-	}
 }

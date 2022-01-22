@@ -51,17 +51,35 @@ func main() {
 			}
 			if update.Message.IsCommand() {
 				bot.Send(tgbotapi.NewDeleteMessage(chatId, msgId))
-				if msg, err := bot.Send(tgbotapi.NewMessage(chatId, time.Now().String())); err != nil {
-					fmt.Println(err)
-				} else {
-					newSection := tgBot.NewBotSection(user, int(chatId), msg.MessageID, bot)
-					sectionHeap[newSection.Msg_id] = newSection
-					go func() {
-						defer delete(sectionHeap, newSection.Msg_id)
-						newSection.Idle()
-					}()
-					switch strings.ToLower(update.Message.Command()) {
-					case "campjj":
+				switch strings.ToLower(update.Message.Command()) {
+				case "setname":
+					temp := strings.Split(input, " ")
+					if len(temp) == 2 {
+						if err = database.AddEditUserName(int(user.ID), temp[1]); err == nil {
+							bot.Send(tgbotapi.NewMessage(chatId, "✅✅"))
+						}
+					} else {
+						bot.Send(tgbotapi.NewMessage(chatId, "/setname(space)name"))
+					}
+					continue
+				}
+
+				if err := database.CheckUserExist(int(user.ID)); err != nil {
+					bot.Send(tgbotapi.NewMessage(chatId, err.Error()))
+					continue
+				}
+
+				switch strings.ToLower(update.Message.Command()) {
+				case "campjj":
+					if msg, err := bot.Send(tgbotapi.NewMessage(chatId, time.Now().String())); err != nil {
+						fmt.Println(err)
+					} else {
+						newSection := tgBot.NewBotSection(user, int(chatId), msg.MessageID, bot)
+						sectionHeap[newSection.Msg_id] = newSection
+						go func() {
+							defer delete(sectionHeap, newSection.Msg_id)
+							newSection.Idle()
+						}()
 						sectionHeap[msg.MessageID].CallBackHandle("direct menu")
 					}
 				}

@@ -1,6 +1,9 @@
 package service
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"time"
+)
 
 func TypeToJson(i interface{}) string {
 	json, _ := json.Marshal(i)
@@ -20,9 +23,15 @@ type RangeUnit struct {
 	End   string
 }
 
-// func (r *RangeUnit) SetStart(start string) {
-// 	r.Start = start
-// }
-// func (r *RangeUnit) SetEnd(end string) {
-// 	r.End = end
-// }
+func BetweenDayList(ru *RangeUnit) []string {
+	result := make([]string, 0)
+	s, _ := time.Parse("2006-01-02", ru.Start)
+	e, _ := time.Parse("2006-01-02", ru.End)
+	for {
+		result = append(result, s.Format("2006-01-02"))
+		s = s.AddDate(0, 0, 1)
+		if e.Sub(s).Hours() < 0 {
+			return result
+		}
+	}
+}

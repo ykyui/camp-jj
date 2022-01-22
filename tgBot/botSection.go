@@ -65,7 +65,9 @@ func (s *MyBotSection) Idle() {
 				if msg, err := s.updateMsg(); err != nil {
 					s.bot.Send(tgbotapi.NewEditMessageText(int64(s.Chat_id), s.Msg_id, err.Error()))
 				} else {
-					s.bot.Send(msg)
+					temp := msg.(tgbotapi.EditMessageTextConfig)
+					temp.ParseMode = tgbotapi.ModeMarkdown
+					s.bot.Send(temp)
 				}
 				ticker.Reset(time.Second * 120)
 			} else {
@@ -73,26 +75,6 @@ func (s *MyBotSection) Idle() {
 			}
 		}
 	}
-}
-
-func (b *MyBotSection) ReplyHandle(input string) (result tgbotapi.Chattable) {
-	switch b.Action {
-	case "addEquipment":
-		if err := database.AddEquipment(b.Camp_id, strings.Split(input, "\n"), b.User); err != nil {
-			msg, _ := b.bot.Send(tgbotapi.NewMessage(int64(b.Chat_id), err.Error()))
-			b.ReplyMsgId = msg.MessageID
-		}
-	case "addfood":
-		temp := strings.Split(input, "\n")
-		if len(temp) < 1 {
-		} else if err := database.AddFood(b.Camp_id, b.Contact.(string), temp[0], temp[1:], b.User); err != nil {
-			msg, _ := b.bot.Send(tgbotapi.NewMessage(int64(b.Chat_id), err.Error()))
-			b.ReplyMsgId = msg.MessageID
-		}
-	}
-	b.Action = ""
-	b.update <- true
-	return
 }
 
 func (b *MyBotSection) CallBackHandle(input string) {
@@ -106,7 +88,16 @@ func (b *MyBotSection) CallBackHandle(input string) {
 		case "subcamp":
 			b.Camp_id, _ = strconv.Atoi(action[2])
 			b.DisSub = database.SubCamp(b.Camp_id, b.update)
-			// case "menu", "equipment", "food":
+		case "equipment", "food":
+			if campInfo, err := database.GetCampInfo(b.Camp_id); err == nil {
+				if _, ok := campInfo.MemberHeap[int(b.User.ID)]; !ok {
+					b.back()
+					if msg, err := b.bot.Send(tgbotapi.NewMessage(int64(b.Chat_id), "join camp first")); err == nil {
+						b.ReplyMsgId = msg.MessageID
+					}
+
+				}
+			}
 		}
 	case "action":
 		b.Action = action[1]
@@ -126,6 +117,13 @@ func (b *MyBotSection) CallBackHandle(input string) {
 				b.back()
 			}
 		case "quit":
+			if campInfo, err := database.GetCampInfo(b.Camp_id); err == nil {
+				if user, ok := campInfo.MemberHeap[int(b.User.ID)]; ok {
+					if msg, err := b.bot.Send(tgbotapi.NewMessage(int64(b.Chat_id), fmt.Sprintf("%s quit %s", user.Name, user.JoinDate))); err == nil {
+						b.bot.Send(tgbotapi.PinChatMessageConfig{ChatID: int64(b.Chat_id), MessageID: msg.MessageID})
+					}
+				}
+			}
 			database.Quit(b.Camp_id, b.User)
 		case "previousMonth":
 			date, _ := time.Parse("2006-01-02", b.Contact.(*service.RangeUnit).Start)
@@ -148,12 +146,36 @@ func (b *MyBotSection) CallBackHandle(input string) {
 				b.ReplyMsgId = msg.MessageID
 			} else {
 				b.back()
+				if campInfo, err := database.GetCampInfo(b.Camp_id); err == nil {
+					if user, ok := campInfo.MemberHeap[int(b.User.ID)]; ok {
+						if msg, err := b.bot.Send(tgbotapi.NewMessage(int64(b.Chat_id), fmt.Sprintf("%s join %s", user.Name, user.JoinDate))); err == nil {
+							b.bot.Send(tgbotapi.PinChatMessageConfig{ChatID: int64(b.Chat_id), MessageID: msg.MessageID})
+						}
+					}
+				}
 			}
-		case "addEquipment":
+		case "addequipment":
+			b.Contact = action[2]
 			replyMsg = "reply this message\nequipment name\nequipment name\n.\n.\n.\n."
+		case "bringequipment":
+			if err := database.BringItem(b.Camp_id, int(b.User.ID), action[2], 2); err != nil {
+				replyMsg = err.Error()
+			}
+		case "dropequipment":
+			if err := database.DropItem(b.Camp_id, int(b.User.ID), action[2], 2); err != nil {
+				replyMsg = err.Error()
+			}
 		case "addfood":
 			b.Contact = action[2]
 			replyMsg = "reply this message\nfood name\ningredients\ningredients\n.\n.\n.\n."
+		case "bringfood":
+			if err := database.BringItem(b.Camp_id, int(b.User.ID), action[2], 1); err != nil {
+				replyMsg = err.Error()
+			}
+		case "dropfood":
+			if err := database.DropItem(b.Camp_id, int(b.User.ID), action[2], 1); err != nil {
+				replyMsg = err.Error()
+			}
 		case "dump":
 			return
 		}
@@ -169,6 +191,26 @@ func (b *MyBotSection) CallBackHandle(input string) {
 
 	b.update <- true
 
+}
+
+func (b *MyBotSection) ReplyHandle(input string) (result tgbotapi.Chattable) {
+	switch b.Action {
+	case "addequipment":
+		if err := database.AddEquipment(b.Camp_id, b.Contact.(string), strings.Split(input, "\n"), b.User); err != nil {
+			msg, _ := b.bot.Send(tgbotapi.NewMessage(int64(b.Chat_id), err.Error()))
+			b.ReplyMsgId = msg.MessageID
+		}
+	case "addfood":
+		temp := strings.Split(input, "\n")
+		if len(temp) < 1 {
+		} else if err := database.AddFood(b.Camp_id, b.Contact.(string), temp[0], temp[1:], b.User); err != nil {
+			msg, _ := b.bot.Send(tgbotapi.NewMessage(int64(b.Chat_id), err.Error()))
+			b.ReplyMsgId = msg.MessageID
+		}
+	}
+	b.Action = ""
+	b.update <- true
+	return
 }
 
 func (b *MyBotSection) updateMsg() (tgbotapi.Chattable, error) {
@@ -201,19 +243,17 @@ func (b *MyBotSection) updateMsg() (tgbotapi.Chattable, error) {
 		if err != nil {
 			return nil, err
 		}
-		return tgbotapi.NewEditMessageTextAndMarkup(int64(b.Chat_id), b.Msg_id, userName+"\n"+camp.ToMsg(), campFoodKb(&camp.RangeUnit)), nil
+		ru := camp.RangeUnit
+		ru.Start = camp.MemberHeap[int(b.User.ID)].JoinDate
+		return tgbotapi.NewEditMessageTextAndMarkup(int64(b.Chat_id), b.Msg_id, userName+"\n"+camp.ToMsg(), campFoodKb(&ru, camp.FoodGroupByDay, int(b.User.ID))), nil
 	case "equipment":
 		camp, err := database.GetCampInfo(b.Camp_id)
 		if err != nil {
 			return nil, err
 		}
-		return tgbotapi.NewEditMessageTextAndMarkup(int64(b.Chat_id), b.Msg_id, userName+"\n"+camp.ToMsg(), campEquipmentKb()), nil
-	case "bringequipment":
-		camp, err := database.GetCampInfo(b.Camp_id)
-		if err != nil {
-			return nil, err
-		}
-		return tgbotapi.NewEditMessageTextAndMarkup(int64(b.Chat_id), b.Msg_id, userName+"\n"+camp.ToMsg(), bringEquipmentKb(int(b.User.ID), camp.EquipmentHeap)), nil
+		ru := camp.RangeUnit
+		ru.Start = camp.MemberHeap[int(b.User.ID)].JoinDate
+		return tgbotapi.NewEditMessageTextAndMarkup(int64(b.Chat_id), b.Msg_id, userName+"\n"+camp.ToMsg(), campEquipmentKb(&ru, camp.EquipmentGroupByDay, int(b.User.ID))), nil
 	}
 	return nil, nil
 }
