@@ -116,15 +116,6 @@ func (b *MyBotSection) CallBackHandle(input string) {
 			} else {
 				b.back()
 			}
-		case "quit":
-			if campInfo, err := database.GetCampInfo(b.Camp_id); err == nil {
-				if user, ok := campInfo.MemberHeap[int(b.User.ID)]; ok {
-					if msg, err := b.bot.Send(tgbotapi.NewMessage(int64(b.Chat_id), fmt.Sprintf("%s quit %s", user.Name, user.JoinDate))); err == nil {
-						b.bot.Send(tgbotapi.PinChatMessageConfig{ChatID: int64(b.Chat_id), MessageID: msg.MessageID})
-					}
-				}
-			}
-			database.Quit(b.Camp_id, b.User)
 		case "previousMonth":
 			date, _ := time.Parse("2006-01-02", b.Contact.(*service.RangeUnit).Start)
 			b.Contact.(*service.RangeUnit).Start = date.AddDate(0, -1, 0).Format("2006-01-02")
@@ -154,6 +145,17 @@ func (b *MyBotSection) CallBackHandle(input string) {
 					}
 				}
 			}
+		case "quit":
+			if campInfo, err := database.GetCampInfo(b.Camp_id); err == nil {
+				if user, ok := campInfo.MemberHeap[int(b.User.ID)]; ok {
+					if msg, err := b.bot.Send(tgbotapi.NewMessage(int64(b.Chat_id), fmt.Sprintf("%s quit %s", user.Name, user.JoinDate))); err == nil {
+						b.bot.Send(tgbotapi.PinChatMessageConfig{ChatID: int64(b.Chat_id), MessageID: msg.MessageID})
+					}
+				}
+			}
+			database.Quit(b.Camp_id, b.User)
+		case "rename":
+			replyMsg = "reply this message with name"
 		case "addequipment":
 			b.Contact = action[2]
 			replyMsg = "reply this message\nequipment name\nequipment name\n.\n.\n.\n."
@@ -203,7 +205,13 @@ func (b *MyBotSection) ReplyHandle(input string) (result tgbotapi.Chattable) {
 	case "addfood":
 		temp := strings.Split(input, "\n")
 		if len(temp) < 1 {
+			break
 		} else if err := database.AddFood(b.Camp_id, b.Contact.(string), temp[0], temp[1:], b.User); err != nil {
+			msg, _ := b.bot.Send(tgbotapi.NewMessage(int64(b.Chat_id), err.Error()))
+			b.ReplyMsgId = msg.MessageID
+		}
+	case "rename":
+		if err := database.UpdateCampName(input, b.Camp_id); err != nil {
 			msg, _ := b.bot.Send(tgbotapi.NewMessage(int64(b.Chat_id), err.Error()))
 			b.ReplyMsgId = msg.MessageID
 		}
@@ -231,7 +239,7 @@ func (b *MyBotSection) updateMsg() (tgbotapi.Chattable, error) {
 		if err != nil {
 			return nil, err
 		}
-		return tgbotapi.NewEditMessageTextAndMarkup(int64(b.Chat_id), b.Msg_id, userName+"\n"+camp.ToMsg(), campMainKb()), nil
+		return tgbotapi.NewEditMessageTextAndMarkup(int64(b.Chat_id), b.Msg_id, userName+"\n"+camp.ToMsg(), campMainKb(camp.CreateBy == int(b.User.ID))), nil
 	case "join":
 		camp, err := database.GetCampInfo(b.Camp_id)
 		if err != nil {
@@ -262,7 +270,7 @@ func (b *MyBotSection) confirmAction() error {
 	switch strings.ToLower(b.current()) {
 	case "newcamp":
 		temp := b.Contact.(*service.RangeUnit)
-		return database.CreateCamp(*temp)
+		return database.CreateCamp(*temp, int(b.User.ID))
 	}
 	return nil
 }

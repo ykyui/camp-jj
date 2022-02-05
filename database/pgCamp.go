@@ -10,31 +10,33 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
-func CreateCamp(ru service.RangeUnit) error {
+func CreateCamp(ru service.RangeUnit, userId int) error {
 	tx, err := pgDb.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	stmt, err := tx.Prepare(`insert into camp (id, start_date, end_date) 
-	select coalesce(max(id),0)+1,TO_DATE($1,'YYYY-MM-DD'),TO_DATE($2,'YYYY-MM-DD') from camp`)
+	stmt, err := tx.Prepare(`insert into camp (id, start_date, end_date, create_by) 
+	select coalesce(max(id),0)+1,TO_DATE($1,'YYYY-MM-DD'),TO_DATE($2,'YYYY-MM-DD'), $3 from camp`)
 	if err != nil {
 		return err
 	}
 	defer stmt.Close()
-	if _, err = stmt.Exec(ru.Start, ru.End); err != nil {
+	if _, err = stmt.Exec(ru.Start, ru.End, userId); err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
 type CampInfo struct {
-	Id            int
-	RangeUnit     service.RangeUnit
-	FoodHeap      map[int]*Food
-	EquipmentHeap map[int]*Item
-	MemberHeap    map[int]*Member
-
+	Id                   int
+	Name                 string
+	RangeUnit            service.RangeUnit
+	FoodHeap             map[int]*Food
+	EquipmentHeap        map[int]*Item
+	MemberHeap           map[int]*Member
+	CreateBy             int
+	CreateByName         string
 	MemberGroupByJoinDay map[string][]*Member
 	FoodGroupByDay       map[string][]*Food
 	EquipmentGroupByDay  map[string][]*Item
@@ -67,7 +69,7 @@ const (
 )
 
 func (c *CampInfo) ToMsg() (result string) {
-	result = fmt.Sprintf("🏕️: %d\n📅: %s To %s\n", c.Id, c.RangeUnit.Start, c.RangeUnit.End)
+	result = fmt.Sprintf("create by:%s\nname:%s\n🏕️: %d\n📅: %s To %s\n", c.CreateByName, c.Name, c.Id, c.RangeUnit.Start, c.RangeUnit.End)
 
 	result += "🧍‍♀️🧍🧍‍♂️👭 \n"
 	count := 1
@@ -126,7 +128,10 @@ func (c *CampInfo) ToMsg() (result string) {
 }
 
 func GetCampList() (result []*CampInfo, err error) {
-	stmt, err := pgDb.Prepare(`select id, TO_CHAR(start_date, 'YYYY-MM-DD'), TO_CHAR(end_date, 'YYYY-MM-DD') from camp where current_date - INTERVAL '7 day' < end_date`)
+	stmt, err := pgDb.Prepare(`select camp.id, name, TO_CHAR(start_date, 'YYYY-MM-DD'), TO_CHAR(end_date, 'YYYY-MM-DD'), create_by, user_name
+	from camp 
+	left join group_user on create_by = group_user.id 
+	where current_date - INTERVAL '7 day' < end_date`)
 	if err != nil {
 		return nil, err
 	}
@@ -138,25 +143,31 @@ func GetCampList() (result []*CampInfo, err error) {
 		defer rows.Close()
 		for rows.Next() {
 			var (
-				id    sql.NullInt64
-				start sql.NullString
-				end   sql.NullString
+				id         sql.NullInt64
+				name       sql.NullString
+				start      sql.NullString
+				end        sql.NullString
+				createBy   sql.NullInt64
+				createName sql.NullString
 			)
-			if err = rows.Scan(&id, &start, &end); err != nil {
+			if err = rows.Scan(&id, &name, &start, &end, &createBy, &createName); err != nil {
 				return nil, err
 			}
-			result = append(result, &CampInfo{int(id.Int64), service.RangeUnit{Start: start.String, End: end.String}, nil, nil, nil, nil, nil, nil})
+			result = append(result, &CampInfo{int(id.Int64), name.String, service.RangeUnit{Start: start.String, End: end.String}, nil, nil, nil, int(createBy.Int64), createName.String, nil, nil, nil})
 		}
 	}
 	return result, nil
 }
 
 func getCampInfo(id int) (*CampInfo, error) {
-	stmt_camp_date, err := pgDb.Prepare(`select TO_CHAR(start_date, 'YYYY-MM-DD'), TO_CHAR(end_date, 'YYYY-MM-DD') from camp where id = $1`)
+	stmt_camp, err := pgDb.Prepare(`select name, TO_CHAR(start_date, 'YYYY-MM-DD'), TO_CHAR(end_date, 'YYYY-MM-DD'), create_by, user_name 
+	from camp 
+	left join group_user on create_by = group_user.id 
+	where camp.id = $1`)
 	if err != nil {
 		return nil, err
 	}
-	defer stmt_camp_date.Close()
+	defer stmt_camp.Close()
 
 	stmt_camp_user, err := pgDb.Prepare(`select user_id, TO_CHAR(join_date, 'YYYY-MM-DD'), user_name 
 	from camp_member 
@@ -191,13 +202,16 @@ func getCampInfo(id int) (*CampInfo, error) {
 	defer stmt_camp_equipment.Close()
 
 	var (
-		start_date sql.NullString
-		end_date   sql.NullString
+		start_date     sql.NullString
+		end_date       sql.NullString
+		name           sql.NullString
+		create_by      sql.NullInt64
+		create_by_name sql.NullString
 	)
-	if err = stmt_camp_date.QueryRow(id).Scan(&start_date, &end_date); err != nil {
+	if err = stmt_camp.QueryRow(id).Scan(&name, &start_date, &end_date, &create_by, &create_by_name); err != nil {
 		return nil, err
 	}
-	campInfo := &CampInfo{id, service.RangeUnit{Start: start_date.String, End: end_date.String}, make(map[int]*Food), make(map[int]*Item), make(map[int]*Member), make(map[string][]*Member), make(map[string][]*Food), make(map[string][]*Item)}
+	campInfo := &CampInfo{id, name.String, service.RangeUnit{Start: start_date.String, End: end_date.String}, make(map[int]*Food), make(map[int]*Item), make(map[int]*Member), int(create_by.Int64), create_by_name.String, make(map[string][]*Member), make(map[string][]*Food), make(map[string][]*Item)}
 
 	if rows, err := stmt_camp_user.Query(id); err != nil {
 		return nil, err
@@ -482,5 +496,24 @@ func CheckUserExist(userId int) error {
 	} else if count.Int64 != 1 {
 		return errors.New("set name first")
 	}
+	return nil
+}
+
+func UpdateCampName(name string, campId int) error {
+	tx, err := pgDb.Begin()
+	if err != nil {
+		return err
+	}
+	stmt_update_came_name, err := tx.Prepare(`update camp set name = $1 where id = $2`)
+	if err != nil {
+		return err
+	}
+	if _, err = stmt_update_came_name.Exec(name, campId); err != nil {
+		return err
+	}
+	if err = tx.Commit(); err != nil {
+		return err
+	}
+	updateCampInfo(campId)
 	return nil
 }
