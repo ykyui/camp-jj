@@ -1,0 +1,35 @@
+version: '3'
+services:
+  redis:
+    container_name: 'redis'
+    image: "redis:alpine"
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+
+  db:
+    container_name: 'postgres'
+    image: postgres
+    environment:
+      POSTGRES_PASSWORD: root
+    volumes:
+      - pgdata:/var/lib/postgresql/data/
+    ports:
+      - "5432:5432"
+
+  camp-jj-bot:
+    container_name: 'camp-jj-bot'
+    build:
+      dockerfile: Dockerfile
+    working_dir: /camp-jj
+    volumes:
+      - .:/camp-jj
+    restart: always
+    depends_on:
+      - db
+      - redis
+    stdin_open: true
+    tty: true
+volumes:
+  pgdata:
+
